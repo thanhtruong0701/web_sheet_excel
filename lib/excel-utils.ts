@@ -186,7 +186,7 @@ export function extractSafeCellValue(cell: ExcelJS.Cell): any {
 }
 
 /**
- * Copy row with formatting
+ * Copy row with formatting - keeps original column positions
  */
 export function copyRowWithFormatting(
   sourceRow: ExcelJS.Row,
@@ -194,11 +194,10 @@ export function copyRowWithFormatting(
   startCol: number,
   endCol: number
 ): void {
-  let targetColIndex = 1;
-
+  // Copy cells keeping original column positions
   for (let colIndex = startCol; colIndex <= endCol; colIndex++) {
     const sourceCell = sourceRow.getCell(colIndex);
-    const targetCell = targetRow.getCell(targetColIndex);
+    const targetCell = targetRow.getCell(colIndex); // Keep same column position!
 
     // Extract safe cell value using helper function
     const cellValue = extractSafeCellValue(sourceCell);
@@ -222,8 +221,71 @@ export function copyRowWithFormatting(
     if (sourceCell.numFmt) {
       targetCell.numFmt = sourceCell.numFmt;
     }
+  }
+}
 
-    targetColIndex++;
+/**
+ * Copy column widths from source sheet to target sheet
+ */
+export function copyColumnWidths(
+  sourceSheet: ExcelJS.Worksheet,
+  targetSheet: ExcelJS.Worksheet,
+  startCol: number,
+  endCol: number
+): void {
+  for (let colIndex = startCol; colIndex <= endCol; colIndex++) {
+    const sourceCol = sourceSheet.getColumn(colIndex);
+    const targetCol = targetSheet.getColumn(colIndex);
+    if (sourceCol.width) {
+      targetCol.width = sourceCol.width;
+    }
+  }
+}
+
+/**
+ * Copy merged cells from source sheet to target sheet for specific rows
+ */
+export function copyMergedCells(
+  sourceSheet: ExcelJS.Worksheet,
+  targetSheet: ExcelJS.Worksheet,
+  sourceRowStart: number,
+  sourceRowEnd: number,
+  targetRowOffset: number,
+  startCol: number,
+  endCol: number
+): void {
+  // Get all merged cell ranges from source
+  const merges = sourceSheet.model.merges || [];
+  
+  for (const merge of merges) {
+    // Parse merge range like "A1:B2"
+    const match = merge.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+    if (!match) continue;
+    
+    const startColLetter = match[1];
+    const startRowNum = parseInt(match[2]);
+    const endColLetter = match[3];
+    const endRowNum = parseInt(match[4]);
+    
+    const mergeStartCol = columnLetterToNumber(startColLetter);
+    const mergeEndCol = columnLetterToNumber(endColLetter);
+    
+    // Check if this merge is within our row and column range
+    if (startRowNum >= sourceRowStart && endRowNum <= sourceRowEnd &&
+        mergeStartCol >= startCol && mergeEndCol <= endCol) {
+      // Calculate new row positions
+      const newStartRow = startRowNum - sourceRowStart + targetRowOffset;
+      const newEndRow = endRowNum - sourceRowStart + targetRowOffset;
+      
+      try {
+        targetSheet.mergeCells(
+          newStartRow, mergeStartCol,
+          newEndRow, mergeEndCol
+        );
+      } catch (e) {
+        // Ignore merge errors (cell might already be merged)
+      }
+    }
   }
 }
 
@@ -234,20 +296,28 @@ export async function mergeExcelFiles(
   files: File[],
   config: MergeConfig
 ): Promise<ArrayBuffer> {
-  // Load the first file as base workbook to add merged sheet into it
+  // Load the first file as base workbook
   const firstFileBuffer = await files[0].arrayBuffer();
   const baseWorkbook = new ExcelJS.Workbook();
   await baseWorkbook.xlsx.load(firstFileBuffer);
 
+  // Get the first sheet as template for structure
+  const templateSheet = baseWorkbook.worksheets[0];
+  
   // Create a new consolidated worksheet
   const worksheet = baseWorkbook.addWorksheet('Consolidated');
 
   const startColNum = columnLetterToNumber(config.startColumn);
   const endColNum = columnLetterToNumber(config.endColumn);
+  const startRowNum = config.startRow;
+
+  // Copy column widths from template sheet
+  copyColumnWidths(templateSheet, worksheet, startColNum, endColNum);
 
   let targetRowNum = 1;
   let isFirstSheet = true;
-  let signatureRowsToAdd: ExcelJS.Row[] = []; // Store all signature section rows
+  let signatureRowsToAdd: { row: ExcelJS.Row; sourceSheet: ExcelJS.Worksheet }[] = [];
+  let firstSourceSheet: ExcelJS.Worksheet | null = null;
 
   for (const file of files) {
     const arrayBuffer = await file.arrayBuffer();
@@ -256,53 +326,70 @@ export async function mergeExcelFiles(
 
     // Process each sheet in the file
     sourceWorkbook.worksheets.forEach((sourceSheet) => {
+      // Save first source sheet for merged cells reference
+      if (!firstSourceSheet) {
+        firstSourceSheet = sourceSheet;
+      }
+
       // Always find special rows so we can skip or include them based on config
       const totalRowNum = findTotalRow(sourceSheet);
       const signatureRowNum = findSignatureRow(sourceSheet);
 
-      const startRowNum = config.startRow;
-
-      // Copy rows from source sheet
-      sourceSheet.eachRow((sourceRow, rowNum) => {
-        // For first sheet: copy ALL rows (starting from row 1)
-        // For subsequent sheets: skip header rows (rows 1 to startRowNum-1), only copy data from startRowNum
-        if (!isFirstSheet && rowNum < startRowNum) {
-          return; // Skip header rows (1 to startRowNum-1) for non-first sheets
+      // For first sheet: copy header rows (1 to startRowNum-1) first
+      if (isFirstSheet) {
+        for (let rowNum = 1; rowNum < startRowNum; rowNum++) {
+          const sourceRow = sourceSheet.getRow(rowNum);
+          const targetRow = worksheet.getRow(targetRowNum);
+          copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+          targetRow.commit();
+          targetRowNum++;
         }
+        
+        // Copy merged cells for header section
+        copyMergedCells(sourceSheet, worksheet, 1, startRowNum - 1, 1, startColNum, endColNum);
+      }
 
+      // Copy data rows (from startRowNum onwards)
+      const lastRow = sourceSheet.lastRow?.number || 0;
+      for (let rowNum = startRowNum; rowNum <= lastRow; rowNum++) {
+        const sourceRow = sourceSheet.getRow(rowNum);
+        
         // Handle total row - skip if not included, add if included
         if (totalRowNum && rowNum === totalRowNum) {
           if (config.includeTotal) {
-            const targetRow = worksheet.addRow([]);
+            const targetRow = worksheet.getRow(targetRowNum);
             copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+            targetRow.commit();
             targetRowNum++;
           }
-          // Always skip TOTAL row from regular data copy (either included above or excluded)
-          return;
+          continue;
         }
 
-        // Handle signature section - skip always during data copy, save to add only once at end if included
+        // Handle signature section - save to add only once at end
         if (signatureRowNum && rowNum >= signatureRowNum) {
-          // Save signature section rows only from the first sheet that has them
           if (config.includeSignature && signatureRowsToAdd.length === 0) {
-            signatureRowsToAdd.push(sourceRow);
-          } else if (config.includeSignature && signatureRowsToAdd.length > 0 && isFirstSheet) {
-            // Continue adding rows from the same signature section
-            signatureRowsToAdd.push(sourceRow);
+            // Save all signature rows from first sheet that has them
+            for (let sigRowNum = signatureRowNum; sigRowNum <= lastRow; sigRowNum++) {
+              signatureRowsToAdd.push({ 
+                row: sourceSheet.getRow(sigRowNum), 
+                sourceSheet 
+              });
+            }
           }
-          // Skip all rows from signature row onwards (signature section)
-          return;
+          break; // Stop processing this sheet's rows
         }
 
         // Skip subtotal/group total rows if includeTotal is false
         if (!config.includeTotal && isSubtotalRow(sourceRow, startColNum, endColNum)) {
-          return;
+          continue;
         }
 
-        const targetRow = worksheet.addRow([]);
+        // Copy regular data row
+        const targetRow = worksheet.getRow(targetRowNum);
         copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+        targetRow.commit();
         targetRowNum++;
-      });
+      }
 
       // After processing first sheet, mark it as done
       isFirstSheet = false;
@@ -311,16 +398,13 @@ export async function mergeExcelFiles(
 
   // Add signature section only once at the very end
   if (signatureRowsToAdd.length > 0) {
-    for (const sigRow of signatureRowsToAdd) {
-      const targetRow = worksheet.addRow([]);
+    const sigStartRow = targetRowNum;
+    for (const { row: sigRow } of signatureRowsToAdd) {
+      const targetRow = worksheet.getRow(targetRowNum);
       copyRowWithFormatting(sigRow, targetRow, startColNum, endColNum);
+      targetRow.commit();
+      targetRowNum++;
     }
-  }
-
-  // Set column widths
-  const colRange = endColNum - startColNum + 1;
-  for (let i = 1; i <= colRange; i++) {
-    worksheet.columns[i - 1].width = 15;
   }
 
   try {
