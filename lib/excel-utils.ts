@@ -349,9 +349,12 @@ export async function mergeExcelFiles(
         copyMergedCells(sourceSheet, worksheet, 1, startRowNum - 1, 1, startColNum, endColNum);
       }
 
-      // Copy data rows (from startRowNum onwards)
+      // Copy data rows
+      // For first sheet: copy from startRowNum (includes header row of data table)
+      // For other sheets: copy from startRowNum + 1 (skip header row of data table)
+      const dataStartRow = isFirstSheet ? startRowNum : startRowNum + 1;
       const lastRow = sourceSheet.lastRow?.number || 0;
-      for (let rowNum = startRowNum; rowNum <= lastRow; rowNum++) {
+      for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
         const sourceRow = sourceSheet.getRow(rowNum);
         
         // Handle total row - skip if not included, add if included
