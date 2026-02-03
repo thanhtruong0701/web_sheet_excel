@@ -79,24 +79,36 @@ export function isSubtotalRow(
 }
 
 /**
- * Find signature row (contains both "Người lập phiếu" and "Người nhận")
+ * Find signature row - looks for signature keywords
+ * Supports: "Người lập phiếu", "Người nhận", "Signature of sender", "Chữ ký người gửi"
  */
 export function findSignatureRow(worksheet: ExcelJS.Worksheet): number | null {
   let signatureRow: number | null = null;
 
   worksheet.eachRow((row, rowNumber) => {
-    let hasCreator = false;
-    let hasReceiver = false;
+    if (signatureRow) return; // Already found
 
     row.eachCell((cell) => {
-      const cellValue = cell.value?.toString().trim();
-      if (cellValue?.includes('Người lập phiếu')) hasCreator = true;
-      if (cellValue?.includes('Người nhận')) hasReceiver = true;
-    });
+      const cellValue = cell.value?.toString().trim().toLowerCase();
+      if (!cellValue) return;
 
-    if (hasCreator && hasReceiver && !signatureRow) {
-      signatureRow = rowNumber;
-    }
+      // Check for signature keywords
+      const signatureKeywords = [
+        'người lập phiếu',
+        'người nhận',
+        'signature of sender',
+        'chữ ký người gửi',
+        'signature',
+        'chữ ký'
+      ];
+
+      for (const keyword of signatureKeywords) {
+        if (cellValue.includes(keyword) && !signatureRow) {
+          signatureRow = rowNumber;
+          return;
+        }
+      }
+    });
   });
 
   return signatureRow;
@@ -253,9 +265,9 @@ export async function mergeExcelFiles(
       // Copy rows from source sheet
       sourceSheet.eachRow((sourceRow, rowNum) => {
         // For first sheet: copy ALL rows (starting from row 1)
-        // For subsequent sheets: skip header rows (rows before startRowNum), only copy data
-        if (!isFirstSheet && rowNum <= startRowNum) {
-          return; // Skip header rows for non-first sheets
+        // For subsequent sheets: skip header rows (rows 1 to startRowNum-1), only copy data from startRowNum
+        if (!isFirstSheet && rowNum < startRowNum) {
+          return; // Skip header rows (1 to startRowNum-1) for non-first sheets
         }
 
         // Handle total row - skip if not included, add if included
