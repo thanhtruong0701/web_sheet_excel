@@ -181,7 +181,36 @@ export function extractSafeCellValue(cell: ExcelJS.Cell): any {
     return null;
   }
   
-  // Simple values (string, number, boolean, date)
+  // Handle date values
+  const cellValue = cell.value;
+  if (cellValue && typeof cellValue === 'object' && 'getMonth' in cellValue) {
+    return cellValue as unknown as Date;
+  }
+  
+  // Handle string dates like "14-mar"
+  if (typeof cell.value === 'string') {
+    // Try to parse date in format "dd-mmm" or "dd-mmm-yy" or "dd-mmm-yyyy"
+    const dateMatch = cell.value.match(/^(\d{1,2})-([a-z]{3})(?:-(\d{2,4}))?$/i);
+    if (dateMatch) {
+      const day = parseInt(dateMatch[1], 10);
+      const month = dateMatch[2].toLowerCase();
+      const year = dateMatch[3] ? parseInt(dateMatch[3], 10) : new Date().getFullYear();
+      
+      // Map month names to numbers (0-11)
+      const months: {[key: string]: number} = {
+        'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
+        'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
+      };
+      
+      if (months[month] !== undefined) {
+        // If year is 2 digits, assume 2000s
+        const fullYear = year < 100 ? 2000 + year : year;
+        return new Date(fullYear, months[month], day);
+      }
+    }
+  }
+  
+  // For other simple values
   return cell.value;
 }
 
@@ -218,7 +247,16 @@ export function copyRowWithFormatting(
     if (sourceCell.border) {
       targetCell.border = { ...sourceCell.border };
     }
-    if (sourceCell.numFmt) {
+    // Copy number format, or set default date format if it's a date cell
+    const sourceValue = sourceCell.value;
+    const isDate = sourceCell.type === ExcelJS.ValueType.Date || 
+                  (sourceValue && 
+                   typeof sourceValue === 'object' && 
+                   'getMonth' in sourceValue && 
+                   typeof sourceValue.getMonth === 'function');
+    if (isDate) {
+      targetCell.numFmt = sourceCell.numFmt || 'dd-mmm'; // Default to 'dd-mmm' for dates
+    } else if (sourceCell.numFmt) {
       targetCell.numFmt = sourceCell.numFmt;
     }
   }
