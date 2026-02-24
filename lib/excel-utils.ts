@@ -19,7 +19,7 @@ export function findTotalRow(worksheet: ExcelJS.Worksheet): number | null {
     if (totalRow) return; // Exit early if already found
 
     let foundTotal = false;
-    row.eachCell((cell) => {
+    row.eachCell(cell => {
       const cellValue = cell.value?.toString().trim().toUpperCase();
       if (cellValue === 'TOTAL') {
         foundTotal = true;
@@ -41,11 +41,7 @@ export function findTotalRow(worksheet: ExcelJS.Worksheet): number | null {
  * - Only 1-2 cells have numeric values (quantity/amount)
  * - No text content in identifier columns
  */
-export function isSubtotalRow(
-  row: ExcelJS.Row,
-  startCol: number,
-  endCol: number
-): boolean {
+export function isSubtotalRow(row: ExcelJS.Row, startCol: number, endCol: number): boolean {
   let emptyCellCount = 0;
   let numericCellCount = 0;
   let textCellCount = 0;
@@ -88,19 +84,12 @@ export function findSignatureRow(worksheet: ExcelJS.Worksheet): number | null {
   worksheet.eachRow((row, rowNumber) => {
     if (signatureRow) return; // Already found
 
-    row.eachCell((cell) => {
+    row.eachCell(cell => {
       const cellValue = cell.value?.toString().trim().toLowerCase();
       if (!cellValue) return;
 
       // Check for signature keywords
-      const signatureKeywords = [
-        'người lập phiếu',
-        'người nhận',
-        'signature of sender',
-        'chữ ký người gửi',
-        'signature',
-        'chữ ký'
-      ];
+      const signatureKeywords = ['người lập phiếu', 'người nhận', 'signature of sender', 'chữ ký người gửi', 'signature', 'chữ ký'];
 
       for (const keyword of signatureKeywords) {
         if (cellValue.includes(keyword) && !signatureRow) {
@@ -139,90 +128,80 @@ export function columnNumberToLetter(num: number): string {
 }
 
 /**
- * Extract a safe cell value - always returns primitive value, never formula objects
+ * Extract cell value exactly as it appears in Excel
  */
-export function extractSafeCellValue(cell: ExcelJS.Cell): any {
-  if (cell.value === undefined || cell.value === null) {
-    return null;
+function cloneCellValue(value: any): any {
+  if (value === null || value === undefined) return value;
+
+  if (value instanceof Date) {
+    return new Date(value.getTime());
   }
 
-  const cellType = cell.type;
+  if (typeof value !== 'object') {
+    return value;
+  }
 
-  if (cellType === ExcelJS.ValueType.Formula) {
-    // For formula cells, use the calculated result only
+  // ExcelJS uses plain objects for some cell value types (e.g. hyperlink, richText)
+  // Shallow clone is typically enough to avoid sharing references.
+  if (Array.isArray(value)) {
+    return value.map(v => cloneCellValue(v));
+  }
+
+  if ('richText' in (value as any) && Array.isArray((value as any).richText)) {
+    return {
+      ...(value as any),
+      richText: (value as any).richText.map((segment: any) => ({ ...segment }))
+    };
+  }
+
+  return { ...(value as any) };
+}
+
+export function extractSafeCellValue(cell: ExcelJS.Cell): any {
+  const value = cell.value;
+  if (value === null || value === undefined) return null;
+
+  if (cell.type === ExcelJS.ValueType.Formula) {
     return cell.result ?? null;
   }
-  
-  if (cellType === ExcelJS.ValueType.RichText) {
-    // Handle rich text
-    const richText = cell.value as ExcelJS.CellRichTextValue;
-    if (richText.richText) {
-      return richText.richText.map((rt: any) => rt.text).join('');
-    }
-    return null;
+
+  if (cell.type === ExcelJS.ValueType.RichText) {
+    const richText = value as ExcelJS.CellRichTextValue;
+    return richText.richText.map(segment => segment.text).join('');
   }
-  
-  if (typeof cell.value === 'object' && cell.value !== null) {
-    // Handle other complex objects
-    const val = cell.value as any;
-    if (val.result !== undefined) {
-      return val.result;
-    }
-    if (val.text !== undefined) {
-      return val.text;
-    }
-    if (val.richText) {
-      return val.richText.map((rt: any) => rt.text).join('');
-    }
-    // Skip formula objects completely
-    if (val.formula !== undefined || val.sharedFormula !== undefined) {
-      return val.result ?? null;
-    }
-    return null;
+
+  if (typeof value === 'string') {
+    // Do not normalize/parse date-like strings.
+    // Preserve original text exactly (e.g. "1/29/2026", "2026-01-29").
+    return value;
   }
-  
-  // Handle date values
-  const cellValue = cell.value;
-  if (cellValue && typeof cellValue === 'object' && 'getMonth' in cellValue) {
-    return cellValue as unknown as Date;
+
+  // Keep numeric value as-is - this handles Excel date serial numbers
+  // The numFmt (number format) will be copied separately to preserve display format
+  if (typeof value === 'number') {
+    return value;
   }
-  
-  // Handle string dates like "14-mar"
-  if (typeof cell.value === 'string') {
-    // Try to parse date in format "dd-mmm" or "dd-mmm-yy" or "dd-mmm-yyyy"
-    const dateMatch = cell.value.match(/^(\d{1,2})-([a-z]{3})(?:-(\d{2,4}))?$/i);
-    if (dateMatch) {
-      const day = parseInt(dateMatch[1], 10);
-      const month = dateMatch[2].toLowerCase();
-      const year = dateMatch[3] ? parseInt(dateMatch[3], 10) : new Date().getFullYear();
-      
-      // Map month names to numbers (0-11)
-      const months: {[key: string]: number} = {
-        'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
-        'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
-      };
-      
-      if (months[month] !== undefined) {
-        // If year is 2 digits, assume 2000s
-        const fullYear = year < 100 ? 2000 + year : year;
-        return new Date(fullYear, months[month], day);
-      }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (typeof value === 'object') {
+    if ('text' in (value as any)) {
+      return (value as any).text;
+    }
+    if ('result' in (value as any)) {
+      return (value as any).result ?? null;
     }
   }
-  
-  // For other simple values
-  return cell.value;
+
+  return cloneCellValue(value);
 }
 
 /**
  * Copy row with formatting - keeps original column positions
  */
-export function copyRowWithFormatting(
-  sourceRow: ExcelJS.Row,
-  targetRow: ExcelJS.Row,
-  startCol: number,
-  endCol: number
-): void {
+export function copyRowWithFormatting(sourceRow: ExcelJS.Row, targetRow: ExcelJS.Row, startCol: number, endCol: number): void {
   // Copy cells keeping original column positions
   for (let colIndex = startCol; colIndex <= endCol; colIndex++) {
     const sourceCell = sourceRow.getCell(colIndex);
@@ -247,16 +226,8 @@ export function copyRowWithFormatting(
     if (sourceCell.border) {
       targetCell.border = { ...sourceCell.border };
     }
-    // Copy number format, or set default date format if it's a date cell
-    const sourceValue = sourceCell.value;
-    const isDate = sourceCell.type === ExcelJS.ValueType.Date || 
-                  (sourceValue && 
-                   typeof sourceValue === 'object' && 
-                   'getMonth' in sourceValue && 
-                   typeof sourceValue.getMonth === 'function');
-    if (isDate) {
-      targetCell.numFmt = sourceCell.numFmt || 'dd-mmm'; // Default to 'dd-mmm' for dates
-    } else if (sourceCell.numFmt) {
+    // Copy number format if it exists
+    if (sourceCell.numFmt) {
       targetCell.numFmt = sourceCell.numFmt;
     }
   }
@@ -265,12 +236,7 @@ export function copyRowWithFormatting(
 /**
  * Copy column widths from source sheet to target sheet
  */
-export function copyColumnWidths(
-  sourceSheet: ExcelJS.Worksheet,
-  targetSheet: ExcelJS.Worksheet,
-  startCol: number,
-  endCol: number
-): void {
+export function copyColumnWidths(sourceSheet: ExcelJS.Worksheet, targetSheet: ExcelJS.Worksheet, startCol: number, endCol: number): void {
   for (let colIndex = startCol; colIndex <= endCol; colIndex++) {
     const sourceCol = sourceSheet.getColumn(colIndex);
     const targetCol = targetSheet.getColumn(colIndex);
@@ -283,43 +249,31 @@ export function copyColumnWidths(
 /**
  * Copy merged cells from source sheet to target sheet for specific rows
  */
-export function copyMergedCells(
-  sourceSheet: ExcelJS.Worksheet,
-  targetSheet: ExcelJS.Worksheet,
-  sourceRowStart: number,
-  sourceRowEnd: number,
-  targetRowOffset: number,
-  startCol: number,
-  endCol: number
-): void {
+export function copyMergedCells(sourceSheet: ExcelJS.Worksheet, targetSheet: ExcelJS.Worksheet, sourceRowStart: number, sourceRowEnd: number, targetRowOffset: number, startCol: number, endCol: number): void {
   // Get all merged cell ranges from source
   const merges = sourceSheet.model.merges || [];
-  
+
   for (const merge of merges) {
     // Parse merge range like "A1:B2"
     const match = merge.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
     if (!match) continue;
-    
+
     const startColLetter = match[1];
     const startRowNum = parseInt(match[2]);
     const endColLetter = match[3];
     const endRowNum = parseInt(match[4]);
-    
+
     const mergeStartCol = columnLetterToNumber(startColLetter);
     const mergeEndCol = columnLetterToNumber(endColLetter);
-    
+
     // Check if this merge is within our row and column range
-    if (startRowNum >= sourceRowStart && endRowNum <= sourceRowEnd &&
-        mergeStartCol >= startCol && mergeEndCol <= endCol) {
+    if (startRowNum >= sourceRowStart && endRowNum <= sourceRowEnd && mergeStartCol >= startCol && mergeEndCol <= endCol) {
       // Calculate new row positions
       const newStartRow = startRowNum - sourceRowStart + targetRowOffset;
       const newEndRow = endRowNum - sourceRowStart + targetRowOffset;
-      
+
       try {
-        targetSheet.mergeCells(
-          newStartRow, mergeStartCol,
-          newEndRow, mergeEndCol
-        );
+        targetSheet.mergeCells(newStartRow, mergeStartCol, newEndRow, mergeEndCol);
       } catch (e) {
         // Ignore merge errors (cell might already be merged)
       }
@@ -330,20 +284,23 @@ export function copyMergedCells(
 /**
  * Merge multiple Excel files into one
  */
-export async function mergeExcelFiles(
-  files: File[],
-  config: MergeConfig
-): Promise<ArrayBuffer> {
-  // Load the first file as base workbook
+export async function mergeExcelFiles(files: File[], config: MergeConfig): Promise<ArrayBuffer> {
+  // Load the first file to get the template structure
   const firstFileBuffer = await files[0].arrayBuffer();
-  const baseWorkbook = new ExcelJS.Workbook();
-  await baseWorkbook.xlsx.load(firstFileBuffer);
+  const templateWorkbook = new ExcelJS.Workbook();
+  await templateWorkbook.xlsx.load(firstFileBuffer, {
+    ignoreNodes: ['sharedFormula']
+  } as any);
 
-  // Get the first sheet as template for structure
-  const templateSheet = baseWorkbook.worksheets[0];
-  
-  // Create a new consolidated worksheet
-  const worksheet = baseWorkbook.addWorksheet('Consolidated');
+  // Keep track of the first worksheet for formatting metadata
+  const templateSheet = templateWorkbook.worksheets[0];
+
+  // Add/replace consolidated sheet inside the first imported workbook
+  const existingConsolidated = templateWorkbook.getWorksheet('Consolidated');
+  if (existingConsolidated) {
+    templateWorkbook.removeWorksheet(existingConsolidated.id);
+  }
+  const worksheet = templateWorkbook.addWorksheet('Consolidated');
 
   const startColNum = columnLetterToNumber(config.startColumn);
   const endColNum = columnLetterToNumber(config.endColumn);
@@ -357,13 +314,21 @@ export async function mergeExcelFiles(
   let signatureRowsToAdd: { row: ExcelJS.Row; sourceSheet: ExcelJS.Worksheet }[] = [];
   let firstSourceSheet: ExcelJS.Worksheet | null = null;
 
-  for (const file of files) {
-    const arrayBuffer = await file.arrayBuffer();
-    const sourceWorkbook = new ExcelJS.Workbook();
-    await sourceWorkbook.xlsx.load(arrayBuffer);
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const file = files[fileIndex];
+    let sourceWorkbook: ExcelJS.Workbook;
+    if (fileIndex === 0) {
+      sourceWorkbook = templateWorkbook;
+    } else {
+      const arrayBuffer = await file.arrayBuffer();
+      sourceWorkbook = new ExcelJS.Workbook();
+      await sourceWorkbook.xlsx.load(arrayBuffer, {
+        ignoreNodes: ['sharedFormula']
+      } as any);
+    }
 
     // Process each sheet in the file
-    sourceWorkbook.worksheets.forEach((sourceSheet) => {
+    sourceWorkbook.worksheets.forEach(sourceSheet => {
       // Save first source sheet for merged cells reference
       if (!firstSourceSheet) {
         firstSourceSheet = sourceSheet;
@@ -382,7 +347,7 @@ export async function mergeExcelFiles(
           targetRow.commit();
           targetRowNum++;
         }
-        
+
         // Copy merged cells for header section
         copyMergedCells(sourceSheet, worksheet, 1, startRowNum - 1, 1, startColNum, endColNum);
       }
@@ -394,7 +359,7 @@ export async function mergeExcelFiles(
       const lastRow = sourceSheet.lastRow?.number || 0;
       for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
         const sourceRow = sourceSheet.getRow(rowNum);
-        
+
         // Handle total row - skip if not included, add if included
         if (totalRowNum && rowNum === totalRowNum) {
           if (config.includeTotal) {
@@ -411,9 +376,9 @@ export async function mergeExcelFiles(
           if (config.includeSignature && signatureRowsToAdd.length === 0) {
             // Save all signature rows from first sheet that has them
             for (let sigRowNum = signatureRowNum; sigRowNum <= lastRow; sigRowNum++) {
-              signatureRowsToAdd.push({ 
-                row: sourceSheet.getRow(sigRowNum), 
-                sourceSheet 
+              signatureRowsToAdd.push({
+                row: sourceSheet.getRow(sigRowNum),
+                sourceSheet
               });
             }
           }
@@ -449,32 +414,32 @@ export async function mergeExcelFiles(
   }
 
   try {
-    const buffer = await baseWorkbook.xlsx.writeBuffer();
+    const buffer = await templateWorkbook.xlsx.writeBuffer();
     return buffer as unknown as ArrayBuffer;
   } catch (error: any) {
-    console.log('[v0] Error in baseWorkbook, attempting clean rebuild:', error.message);
-    
+    console.log('[v0] Error in resultWorkbook, attempting clean rebuild:', error.message);
+
     // If there are still formula issues, completely rebuild without any formulas
     const cleanWorkbook = new ExcelJS.Workbook();
-    
+
     // Copy all original sheets from first file
-    const firstBuffer = await files[0].arrayBuffer();
-    const firstWb = new ExcelJS.Workbook();
-    await firstWb.xlsx.load(firstBuffer);
-    
-    firstWb.worksheets.forEach((sheet) => {
+    const firstWb = templateWorkbook;
+
+    firstWb.worksheets.forEach(sheet => {
+      if (sheet.name === 'Consolidated') return;
+
       const newSheet = cleanWorkbook.addWorksheet(sheet.name);
-      sheet.eachRow((row) => {
+      sheet.eachRow(row => {
         const newRow = newSheet.addRow([]);
         row.eachCell((cell, colNum) => {
           const newCell = newRow.getCell(colNum);
-          
+
           // Extract safe value - never copy formula objects
           const safeValue = extractSafeCellValue(cell);
           if (safeValue !== null) {
             newCell.value = safeValue;
           }
-          
+
           // Copy all formatting
           if (cell.font) newCell.font = { ...cell.font };
           if (cell.fill) newCell.fill = { ...cell.fill };
@@ -485,18 +450,18 @@ export async function mergeExcelFiles(
       });
     });
 
-    // Add consolidated sheet from the problematic worksheet
+    // Add consolidated sheet (rebuilt) at the end
     const cleanSheet = cleanWorkbook.addWorksheet('Consolidated');
-    worksheet.eachRow((row) => {
+    worksheet.eachRow(row => {
       const newRow = cleanSheet.addRow([]);
       row.eachCell((cell, colNum) => {
         const newCell = newRow.getCell(colNum);
-        
+
         const safeValue = extractSafeCellValue(cell);
         if (safeValue !== null) {
           newCell.value = safeValue;
         }
-        
+
         if (cell.font) newCell.font = { ...cell.font };
         if (cell.fill) newCell.fill = { ...cell.fill };
         if (cell.alignment) newCell.alignment = { ...cell.alignment };
