@@ -351,6 +351,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
 
   let targetRowNum = 1;
   let isFirstSheet = true;
+  let firstSheetOfAll = true;
   let signatureRowsToAdd: { row: ExcelJS.Row; sourceSheet: ExcelJS.Worksheet }[] = [];
   let firstSourceSheet: ExcelJS.Worksheet | null = null;
 
@@ -378,8 +379,8 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       const totalRowNum = findTotalRow(sourceSheet);
       const signatureRowNum = findSignatureRow(sourceSheet);
 
-      // For first sheet: copy header rows (1 to startRowNum-1) first
-      if (isFirstSheet) {
+      // For first sheet of all: copy header rows (1 to startRowNum-1) first
+      if (firstSheetOfAll) {
         for (let rowNum = 1; rowNum < startRowNum; rowNum++) {
           const sourceRow = sourceSheet.getRow(rowNum);
           const targetRow = worksheet.getRow(targetRowNum);
@@ -440,6 +441,11 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       // After processing first sheet, mark it as done
       if (isFirstSheet) {
         isFirstSheet = false;
+      }
+      
+      // After processing first sheet of all, mark it as done
+      if (firstSheetOfAll) {
+        firstSheetOfAll = false;
       }
     });
   }
