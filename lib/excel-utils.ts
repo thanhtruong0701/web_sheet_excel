@@ -350,10 +350,8 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
   copyColumnWidths(templateSheet, worksheet, startColNum, endColNum);
 
   let targetRowNum = 1;
-  let isFirstSheet = true;
   let firstSheetOfAll = true;
   let signatureRowsToAdd: { row: ExcelJS.Row; sourceSheet: ExcelJS.Worksheet }[] = [];
-  let firstSourceSheet: ExcelJS.Worksheet | null = null;
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const file = files[fileIndex];
@@ -368,13 +366,9 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       } as any);
     }
 
-    // Process each sheet in the file
-    sourceWorkbook.worksheets.forEach(sourceSheet => {
-      // Save first source sheet for merged cells reference
-      if (!firstSourceSheet) {
-        firstSourceSheet = sourceSheet;
-      }
-
+    // Process only the first sheet in each file
+    const sourceSheet = sourceWorkbook.worksheets[0];
+    if (sourceSheet) {
       // Always find special rows so we can skip or include them based on config
       const totalRowNum = findTotalRow(sourceSheet);
       const signatureRowNum = findSignatureRow(sourceSheet);
@@ -442,7 +436,8 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       if (firstSheetOfAll) {
         firstSheetOfAll = false;
       }
-    });
+    }
+
   }
 
   // Add signature section only once at the very end
@@ -456,12 +451,10 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     }
   }
 
-  const cleanWorkbook = new ExcelJS.Workbook();
-  templateWorkbook.worksheets.forEach(sheet => {
-    const cleanSheet = cleanWorkbook.addWorksheet(sheet.name);
-    copyWorksheetContents(sheet, cleanSheet);
-  });
+  const finalWorkbook = new ExcelJS.Workbook();
+  const finalSheet = finalWorkbook.addWorksheet('Consolidated');
+  copyWorksheetContents(worksheet, finalSheet);
 
-  const buffer = await cleanWorkbook.xlsx.writeBuffer();
+  const buffer = await finalWorkbook.xlsx.writeBuffer();
   return buffer as unknown as ArrayBuffer;
 }
