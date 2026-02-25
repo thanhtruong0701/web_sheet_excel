@@ -246,6 +246,46 @@ export function copyColumnWidths(sourceSheet: ExcelJS.Worksheet, targetSheet: Ex
   }
 }
 
+function copyWorksheetContents(sourceSheet: ExcelJS.Worksheet, targetSheet: ExcelJS.Worksheet): void {
+  const sourceColumnCount = sourceSheet.columnCount || 0;
+  if (sourceColumnCount > 0) {
+    copyColumnWidths(sourceSheet, targetSheet, 1, sourceColumnCount);
+  }
+
+  sourceSheet.eachRow({ includeEmpty: true }, row => {
+    const targetRow = targetSheet.getRow(row.number);
+    if (row.height) {
+      targetRow.height = row.height;
+    }
+
+    row.eachCell({ includeEmpty: true }, (cell, colNum) => {
+      const newCell = targetRow.getCell(colNum);
+
+      const safeValue = extractSafeCellValue(cell);
+      if (safeValue !== null) {
+        newCell.value = safeValue;
+      }
+
+      if (cell.font) newCell.font = { ...cell.font };
+      if (cell.fill) newCell.fill = { ...cell.fill };
+      if (cell.alignment) newCell.alignment = { ...cell.alignment };
+      if (cell.border) newCell.border = { ...cell.border };
+      if (cell.numFmt) newCell.numFmt = cell.numFmt;
+    });
+
+    targetRow.commit();
+  });
+
+  const merges = sourceSheet.model.merges || [];
+  for (const merge of merges) {
+    try {
+      targetSheet.mergeCells(merge);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 /**
  * Copy merged cells from source sheet to target sheet for specific rows
  */
@@ -413,64 +453,12 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     }
   }
 
-  try {
-    const buffer = await templateWorkbook.xlsx.writeBuffer();
-    return buffer as unknown as ArrayBuffer;
-  } catch (error: any) {
-    console.log('[v0] Error in resultWorkbook, attempting clean rebuild:', error.message);
+  const cleanWorkbook = new ExcelJS.Workbook();
+  templateWorkbook.worksheets.forEach(sheet => {
+    const cleanSheet = cleanWorkbook.addWorksheet(sheet.name);
+    copyWorksheetContents(sheet, cleanSheet);
+  });
 
-    // If there are still formula issues, completely rebuild without any formulas
-    const cleanWorkbook = new ExcelJS.Workbook();
-
-    // Copy all original sheets from first file
-    const firstWb = templateWorkbook;
-
-    firstWb.worksheets.forEach(sheet => {
-      if (sheet.name === 'Consolidated') return;
-
-      const newSheet = cleanWorkbook.addWorksheet(sheet.name);
-      sheet.eachRow(row => {
-        const newRow = newSheet.addRow([]);
-        row.eachCell((cell, colNum) => {
-          const newCell = newRow.getCell(colNum);
-
-          // Extract safe value - never copy formula objects
-          const safeValue = extractSafeCellValue(cell);
-          if (safeValue !== null) {
-            newCell.value = safeValue;
-          }
-
-          // Copy all formatting
-          if (cell.font) newCell.font = { ...cell.font };
-          if (cell.fill) newCell.fill = { ...cell.fill };
-          if (cell.alignment) newCell.alignment = { ...cell.alignment };
-          if (cell.border) newCell.border = { ...cell.border };
-          if (cell.numFmt) newCell.numFmt = cell.numFmt;
-        });
-      });
-    });
-
-    // Add consolidated sheet (rebuilt) at the end
-    const cleanSheet = cleanWorkbook.addWorksheet('Consolidated');
-    worksheet.eachRow(row => {
-      const newRow = cleanSheet.addRow([]);
-      row.eachCell((cell, colNum) => {
-        const newCell = newRow.getCell(colNum);
-
-        const safeValue = extractSafeCellValue(cell);
-        if (safeValue !== null) {
-          newCell.value = safeValue;
-        }
-
-        if (cell.font) newCell.font = { ...cell.font };
-        if (cell.fill) newCell.fill = { ...cell.fill };
-        if (cell.alignment) newCell.alignment = { ...cell.alignment };
-        if (cell.border) newCell.border = { ...cell.border };
-        if (cell.numFmt) newCell.numFmt = cell.numFmt;
-      });
-    });
-
-    const buffer = await cleanWorkbook.xlsx.writeBuffer();
-    return buffer as unknown as ArrayBuffer;
-  }
+  const buffer = await cleanWorkbook.xlsx.writeBuffer();
+  return buffer as unknown as ArrayBuffer;
 }
