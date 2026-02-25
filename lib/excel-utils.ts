@@ -368,86 +368,90 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       } as any);
     }
 
-    // Process each sheet in the file
-    sourceWorkbook.worksheets.forEach(sourceSheet => {
-      // Save first source sheet for merged cells reference
-      if (!firstSourceSheet) {
-        firstSourceSheet = sourceSheet;
-      }
+    // Process only the first sheet in each file
+    const sourceSheet = sourceWorkbook.worksheets[0];
+    if (!sourceSheet) {
+      // Return empty buffer if no sheets
+      return new ArrayBuffer(0);
+    }
+    
+    // Save first source sheet for merged cells reference
+    if (!firstSourceSheet) {
+      firstSourceSheet = sourceSheet;
+    }
 
-      // Always find special rows so we can skip or include them based on config
-      const totalRowNum = findTotalRow(sourceSheet);
-      const signatureRowNum = findSignatureRow(sourceSheet);
+    // Always find special rows so we can skip or include them based on config
+    const totalRowNum = findTotalRow(sourceSheet);
+    const signatureRowNum = findSignatureRow(sourceSheet);
 
-      // For first sheet of all: copy header rows (1 to startRowNum-1) first
-      if (firstSheetOfAll) {
-        for (let rowNum = 1; rowNum < startRowNum; rowNum++) {
-          const sourceRow = sourceSheet.getRow(rowNum);
-          const targetRow = worksheet.getRow(targetRowNum);
-          copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
-          targetRow.commit();
-          targetRowNum++;
-        }
-
-        // Copy merged cells for header section
-        copyMergedCells(sourceSheet, worksheet, 1, startRowNum - 1, 1, startColNum, endColNum);
-      }
-
-      // Copy data rows
-      // For first sheet of all: copy from startRowNum (includes header row of data table)
-      // For other sheets: copy from startRowNum + 1 (skip header row of data table)
-      const dataStartRow = firstSheetOfAll ? startRowNum : startRowNum + 1;
-      const lastRow = sourceSheet.lastRow?.number || 0;
-      for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
+    // For first sheet of all: copy header rows (1 to startRowNum-1) first
+    if (firstSheetOfAll) {
+      for (let rowNum = 1; rowNum < startRowNum; rowNum++) {
         const sourceRow = sourceSheet.getRow(rowNum);
-
-        // Handle total row - skip if not included, add if included
-        if (totalRowNum && rowNum === totalRowNum) {
-          if (config.includeTotal) {
-            const targetRow = worksheet.getRow(targetRowNum);
-            copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
-            targetRow.commit();
-            targetRowNum++;
-          }
-          continue;
-        }
-
-        // Handle signature section - save to add only once at end
-        if (signatureRowNum && rowNum >= signatureRowNum) {
-          if (config.includeSignature && signatureRowsToAdd.length === 0) {
-            // Save all signature rows from first sheet that has them
-            for (let sigRowNum = signatureRowNum; sigRowNum <= lastRow; sigRowNum++) {
-              signatureRowsToAdd.push({
-                row: sourceSheet.getRow(sigRowNum),
-                sourceSheet
-              });
-            }
-          }
-          break; // Stop processing this sheet's rows
-        }
-
-        // Skip subtotal/group total rows if includeTotal is false
-        if (!config.includeTotal && isSubtotalRow(sourceRow, startColNum, endColNum)) {
-          continue;
-        }
-
-        // Copy regular data row
         const targetRow = worksheet.getRow(targetRowNum);
         copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
         targetRow.commit();
         targetRowNum++;
       }
 
-      // After processing first sheet, mark it as done
-      if (isFirstSheet) {
-        isFirstSheet = false;
+      // Copy merged cells for header section
+      copyMergedCells(sourceSheet, worksheet, 1, startRowNum - 1, 1, startColNum, endColNum);
+    }
+
+    // Copy data rows
+    // For first sheet of all: copy from startRowNum (includes header row of data table)
+    // For other sheets: copy from startRowNum + 1 (skip header row of data table)
+    const dataStartRow = firstSheetOfAll ? startRowNum : startRowNum + 1;
+    const lastRow = sourceSheet.lastRow?.number || 0;
+    for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
+      const sourceRow = sourceSheet.getRow(rowNum);
+
+      // Handle total row - skip if not included, add if included
+      if (totalRowNum && rowNum === totalRowNum) {
+        if (config.includeTotal) {
+          const targetRow = worksheet.getRow(targetRowNum);
+          copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+          targetRow.commit();
+          targetRowNum++;
+        }
+        continue;
       }
-      
-      // After processing first sheet of all, mark it as done
-      if (firstSheetOfAll) {
-        firstSheetOfAll = false;
+
+      // Handle signature section - save to add only once at end
+      if (signatureRowNum && rowNum >= signatureRowNum) {
+        if (config.includeSignature && signatureRowsToAdd.length === 0) {
+          // Save all signature rows from first sheet that has them
+          for (let sigRowNum = signatureRowNum; sigRowNum <= lastRow; sigRowNum++) {
+            signatureRowsToAdd.push({
+              row: sourceSheet.getRow(sigRowNum),
+              sourceSheet
+            });
+          }
+        }
+        break; // Stop processing this sheet's rows
       }
-    });
+
+      // Skip subtotal/group total rows if includeTotal is false
+      if (!config.includeTotal && isSubtotalRow(sourceRow, startColNum, endColNum)) {
+        continue;
+      }
+
+      // Copy regular data row
+      const targetRow = worksheet.getRow(targetRowNum);
+      copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+      targetRow.commit();
+      targetRowNum++;
+    }
+
+    // After processing first sheet, mark it as done
+    if (isFirstSheet) {
+      isFirstSheet = false;
+    }
+    
+    // After processing first sheet of all, mark it as done
+    if (firstSheetOfAll) {
+      firstSheetOfAll = false;
+    }
   }
 
   // Add signature section only once at the very end
