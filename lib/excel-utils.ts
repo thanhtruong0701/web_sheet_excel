@@ -366,9 +366,10 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       } as any);
     }
 
-    // Process only the first sheet in each file
-    const sourceSheet = sourceWorkbook.worksheets[0];
-    if (sourceSheet) {
+    // Process all sheets in each file
+    sourceWorkbook.worksheets.forEach(sourceSheet => {
+      // Skip the "Consolidated" sheet itself to prevent duplication
+      if (sourceSheet.name === 'Consolidated') return;
       // Always find special rows so we can skip or include them based on config
       const totalRowNum = findTotalRow(sourceSheet);
       const signatureRowNum = findSignatureRow(sourceSheet);
@@ -436,7 +437,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       if (firstSheetOfAll) {
         firstSheetOfAll = false;
       }
-    }
+    });
 
   }
 
@@ -451,10 +452,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     }
   }
 
-  const finalWorkbook = new ExcelJS.Workbook();
-  const finalSheet = finalWorkbook.addWorksheet('Consolidated');
-  copyWorksheetContents(worksheet, finalSheet);
-
-  const buffer = await finalWorkbook.xlsx.writeBuffer();
+  // Return the workbook with original sheets and the new consolidated one
+  const buffer = await templateWorkbook.xlsx.writeBuffer();
   return buffer as unknown as ArrayBuffer;
 }
