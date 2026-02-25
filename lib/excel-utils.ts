@@ -438,7 +438,9 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       }
 
       // After processing first sheet, mark it as done
-      isFirstSheet = false;
+      if (isFirstSheet) {
+        isFirstSheet = false;
+      }
     });
   }
 
