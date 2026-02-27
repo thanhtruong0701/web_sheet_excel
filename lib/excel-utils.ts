@@ -213,18 +213,18 @@ export function copyRowWithFormatting(sourceRow: ExcelJS.Row, targetRow: ExcelJS
       targetCell.value = cellValue;
     }
 
-    // Copy formatting
+    // Copy formatting with deep cloning to prevent cross-workbook reference issues
     if (sourceCell.font) {
-      targetCell.font = sourceCell.font;
+      targetCell.font = cloneStyle(sourceCell.font);
     }
     if (sourceCell.fill) {
-      targetCell.fill = sourceCell.fill;
+      targetCell.fill = cloneStyle(sourceCell.fill);
     }
     if (sourceCell.alignment) {
-      targetCell.alignment = sourceCell.alignment;
+      targetCell.alignment = cloneStyle(sourceCell.alignment);
     }
     if (sourceCell.border) {
-      targetCell.border = sourceCell.border;
+      targetCell.border = cloneStyle(sourceCell.border);
     }
     // Copy number format if it exists
     if (sourceCell.numFmt) {
@@ -320,89 +320,88 @@ export function copyMergedCells(sourceSheet: ExcelJS.Worksheet, targetSheet: Exc
 }
 
 /**
+ * Deep clone style objects to prevent corruption when merging across workbooks
+ */
+function cloneStyle(style: any): any {
+  if (!style) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(style));
+  } catch (e) {
+    return { ...style };
+  }
+}
+
+/**
  * Merge multiple Excel files into one
  */
-export async function mergeExcelFiles(files: File[], config: MergeConfig): Promise<ArrayBuffer> {
-  // Load the first file to get the template structure
-  const firstFileBuffer = await files[0].arrayBuffer();
-  const templateWorkbook = new ExcelJS.Workbook();
-  await templateWorkbook.xlsx.load(firstFileBuffer);
-
-  // Keep track of the first worksheet for formatting metadata
-  const templateSheet = templateWorkbook.worksheets[0];
-
-  // Add/replace consolidated sheet inside the first imported workbook
-  const existingConsolidated = templateWorkbook.getWorksheet('Consolidated');
-  if (existingConsolidated) {
-    templateWorkbook.removeWorksheet(existingConsolidated.id);
-  }
-  const worksheet = templateWorkbook.addWorksheet('Consolidated');
+export async function mergeExcelFiles(files: File[], config: MergeConfig): Promise<Buffer> {
+  const outputWorkbook = new ExcelJS.Workbook();
+  const worksheet = outputWorkbook.addWorksheet('Consolidated');
 
   const startColNum = columnLetterToNumber(config.startColumn);
   const endColNum = columnLetterToNumber(config.endColumn);
   const startRowNum = config.startRow;
 
-  // Copy column widths from template sheet
-  copyColumnWidths(templateSheet, worksheet, startColNum, endColNum);
-
   let targetRowNum = 1;
   let firstSheetOfAll = true;
   let signatureRowsToAdd: { row: ExcelJS.Row; sourceSheet: ExcelJS.Worksheet }[] = [];
+  let templateSheetForWidths: ExcelJS.Worksheet | null = null;
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const file = files[fileIndex];
-    let sourceWorkbook: ExcelJS.Workbook;
-    if (fileIndex === 0) {
-      sourceWorkbook = templateWorkbook;
-    } else {
-      const arrayBuffer = await file.arrayBuffer();
-      sourceWorkbook = new ExcelJS.Workbook();
-      await sourceWorkbook.xlsx.load(arrayBuffer);
-    }
+    const arrayBuffer = await file.arrayBuffer();
+    const sourceWorkbook = new ExcelJS.Workbook();
+
+    // Use Buffer.from for Node.js compatibility
+    const buffer = Buffer.from(arrayBuffer);
+    await sourceWorkbook.xlsx.load(buffer);
 
     // Process all sheets in each file
-    sourceWorkbook.worksheets.forEach(sourceSheet => {
-      // Skip the "Consolidated" sheet itself to prevent duplication
-      if (sourceSheet.name === 'Consolidated') return;
-      // Always find special rows so we can skip or include them based on config
+    for (const sourceSheet of sourceWorkbook.worksheets) {
+      if (sourceSheet.name === 'Consolidated') continue;
+
+      if (!templateSheetForWidths) {
+        templateSheetForWidths = sourceSheet;
+        copyColumnWidths(sourceSheet, worksheet, startColNum, endColNum);
+      }
+
       const totalRowNum = findTotalRow(sourceSheet);
       const signatureRowNum = findSignatureRow(sourceSheet);
 
-      // For first sheet of all: copy header rows (1 to startRowNum-1) first
+      // Copy header rows only from the very first sheet
       if (firstSheetOfAll) {
         for (let rowNum = 1; rowNum < startRowNum; rowNum++) {
           const sourceRow = sourceSheet.getRow(rowNum);
           const targetRow = worksheet.getRow(targetRowNum);
+          if (sourceRow.height) targetRow.height = sourceRow.height;
+
           copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
           targetRowNum++;
         }
-
-        // Copy merged cells for header section
         copyMergedCells(sourceSheet, worksheet, 1, startRowNum - 1, 1, startColNum, endColNum);
       }
 
       // Copy data rows
-      // For first sheet of all: copy from startRowNum (includes header row of data table)
-      // For other sheets: copy from startRowNum + 1 (skip header row of data table)
       const dataStartRow = firstSheetOfAll ? startRowNum : startRowNum + 1;
       const lastRow = sourceSheet.lastRow?.number || 0;
+
       for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
         const sourceRow = sourceSheet.getRow(rowNum);
 
-        // Handle total row - skip if not included, add if included
+        // Handle total row
         if (totalRowNum && rowNum === totalRowNum) {
           if (config.includeTotal) {
             const targetRow = worksheet.getRow(targetRowNum);
+            if (sourceRow.height) targetRow.height = sourceRow.height;
             copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
             targetRowNum++;
           }
           continue;
         }
 
-        // Handle signature section - save to add only once at end
+        // Handle signature section
         if (signatureRowNum && rowNum >= signatureRowNum) {
           if (config.includeSignature && signatureRowsToAdd.length === 0) {
-            // Save all signature rows from first sheet that has them
             for (let sigRowNum = signatureRowNum; sigRowNum <= lastRow; sigRowNum++) {
               signatureRowsToAdd.push({
                 row: sourceSheet.getRow(sigRowNum),
@@ -410,39 +409,35 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
               });
             }
           }
-          break; // Stop processing this sheet's rows
+          break;
         }
 
-        // Skip subtotal/group total rows if includeTotal is false
+        // Skip subtotal rows
         if (!config.includeTotal && isSubtotalRow(sourceRow, startColNum, endColNum)) {
           continue;
         }
 
         // Copy regular data row
         const targetRow = worksheet.getRow(targetRowNum);
+        if (sourceRow.height) targetRow.height = sourceRow.height;
         copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
         targetRowNum++;
       }
 
-      // After processing first sheet of all, mark it as done
-      if (firstSheetOfAll) {
-        firstSheetOfAll = false;
-      }
-    });
-
-  }
-
-  // Add signature section only once at the very end
-  if (signatureRowsToAdd.length > 0) {
-    const sigStartRow = targetRowNum;
-    for (const { row: sigRow } of signatureRowsToAdd) {
-      const targetRow = worksheet.getRow(targetRowNum);
-      copyRowWithFormatting(sigRow, targetRow, startColNum, endColNum);
-      targetRowNum++;
+      if (firstSheetOfAll) firstSheetOfAll = false;
     }
   }
 
-  // Return the workbook with original sheets and the new consolidated one
-  const buffer = await templateWorkbook.xlsx.writeBuffer();
-  return buffer as unknown as ArrayBuffer;
+  // Add signature section at the end
+  if (signatureRowsToAdd.length > 0) {
+    for (const { row: sigRow, sourceSheet } of signatureRowsToAdd) {
+      const targetRow = worksheet.getRow(targetRowNum);
+      if (sigRow.height) targetRow.height = sigRow.height;
+      copyRowWithFormatting(sigRow, targetRow, startColNum, endColNum);
+      targetRowNum++;
+    }
+    // Note: merging for signature would be complex as it depends on relative positions
+  }
+
+  return await outputWorkbook.xlsx.writeBuffer() as any;
 }
