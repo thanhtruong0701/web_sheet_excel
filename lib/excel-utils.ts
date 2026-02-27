@@ -336,7 +336,7 @@ function cloneStyle(style: any): any {
  */
 export async function mergeExcelFiles(files: File[], config: MergeConfig): Promise<Buffer> {
   const outputWorkbook = new ExcelJS.Workbook();
-  const worksheet = outputWorkbook.addWorksheet('Consolidated');
+  const consolidatedSheet = outputWorkbook.addWorksheet('Consolidated');
 
   const startColNum = columnLetterToNumber(config.startColumn);
   const endColNum = columnLetterToNumber(config.endColumn);
@@ -345,24 +345,34 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
   let targetRowNum = 1;
   let firstSheetOfAll = true;
   let signatureRowsToAdd: { row: ExcelJS.Row; sourceSheet: ExcelJS.Worksheet }[] = [];
-  let templateSheetForWidths: ExcelJS.Worksheet | null = null;
+  let usedSheetNames = new Set<string>(['Consolidated']);
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const file = files[fileIndex];
     const arrayBuffer = await file.arrayBuffer();
     const sourceWorkbook = new ExcelJS.Workbook();
 
-    // Use type assertion to bypass the Buffer<ArrayBuffer> vs Buffer mismatch.
-    // ExcelJS xlsx.load accepts Buffer or Uint8Array.
     await sourceWorkbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
 
-    // Process all sheets in each file
     for (const sourceSheet of sourceWorkbook.worksheets) {
       if (sourceSheet.name === 'Consolidated') continue;
 
-      if (!templateSheetForWidths) {
-        templateSheetForWidths = sourceSheet;
-        copyColumnWidths(sourceSheet, worksheet, startColNum, endColNum);
+      // 1. Preserve the original sheet in the output workbook
+      let originalSheetName = sourceSheet.name;
+      let uniqueName = originalSheetName;
+      let counter = 1;
+      while (usedSheetNames.has(uniqueName)) {
+        uniqueName = `${originalSheetName} (${counter})`;
+        counter++;
+      }
+      usedSheetNames.add(uniqueName);
+
+      const newSheet = outputWorkbook.addWorksheet(uniqueName);
+      copyWorksheetContents(sourceSheet, newSheet);
+
+      // 2. Process data for the Consolidated sheet
+      if (firstSheetOfAll) {
+        copyColumnWidths(sourceSheet, consolidatedSheet, startColNum, endColNum);
       }
 
       const totalRowNum = findTotalRow(sourceSheet);
@@ -372,16 +382,16 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
       if (firstSheetOfAll) {
         for (let rowNum = 1; rowNum < startRowNum; rowNum++) {
           const sourceRow = sourceSheet.getRow(rowNum);
-          const targetRow = worksheet.getRow(targetRowNum);
+          const targetRow = consolidatedSheet.getRow(targetRowNum);
           if (sourceRow.height) targetRow.height = sourceRow.height;
 
           copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
           targetRowNum++;
         }
-        copyMergedCells(sourceSheet, worksheet, 1, startRowNum - 1, 1, startColNum, endColNum);
+        copyMergedCells(sourceSheet, consolidatedSheet, 1, startRowNum - 1, 1, startColNum, endColNum);
       }
 
-      // Copy data rows
+      // Copy data rows to consolidated sheet
       const dataStartRow = firstSheetOfAll ? startRowNum : startRowNum + 1;
       const lastRow = sourceSheet.lastRow?.number || 0;
 
@@ -391,7 +401,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
         // Handle total row
         if (totalRowNum && rowNum === totalRowNum) {
           if (config.includeTotal) {
-            const targetRow = worksheet.getRow(targetRowNum);
+            const targetRow = consolidatedSheet.getRow(targetRowNum);
             if (sourceRow.height) targetRow.height = sourceRow.height;
             copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
             targetRowNum++;
@@ -418,7 +428,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
         }
 
         // Copy regular data row
-        const targetRow = worksheet.getRow(targetRowNum);
+        const targetRow = consolidatedSheet.getRow(targetRowNum);
         if (sourceRow.height) targetRow.height = sourceRow.height;
         copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
         targetRowNum++;
@@ -428,15 +438,14 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     }
   }
 
-  // Add signature section at the end
+  // Add signature section at the end of Consolidated sheet
   if (signatureRowsToAdd.length > 0) {
-    for (const { row: sigRow, sourceSheet } of signatureRowsToAdd) {
-      const targetRow = worksheet.getRow(targetRowNum);
+    for (const { row: sigRow } of signatureRowsToAdd) {
+      const targetRow = consolidatedSheet.getRow(targetRowNum);
       if (sigRow.height) targetRow.height = sigRow.height;
       copyRowWithFormatting(sigRow, targetRow, startColNum, endColNum);
       targetRowNum++;
     }
-    // Note: merging for signature would be complex as it depends on relative positions
   }
 
   return await outputWorkbook.xlsx.writeBuffer() as any;

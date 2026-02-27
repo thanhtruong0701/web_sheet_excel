@@ -37,12 +37,18 @@ export async function POST(request: NextRequest) {
 
     const buffer = await mergeExcelFiles(files, config);
 
+    const firstFile = files[0];
     const timestamp = new Date().toISOString().split('T')[0];
-    return new NextResponse(buffer, {
+    const originalName = firstFile?.name || `${timestamp}.xlsx`;
+    const fileName = originalName.toLowerCase().endsWith('.xlsx')
+      ? `merged_${originalName}`
+      : `merged_${originalName}.xlsx`;
+
+    return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="merged_${timestamp}.xlsx"`,
+        'Content-Disposition': `attachment; filename="${fileName}"`,
       },
     });
   } catch (error) {
