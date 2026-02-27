@@ -352,9 +352,9 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     const arrayBuffer = await file.arrayBuffer();
     const sourceWorkbook = new ExcelJS.Workbook();
 
-    // Use Buffer.from for Node.js compatibility
-    const buffer = Buffer.from(arrayBuffer);
-    await sourceWorkbook.xlsx.load(buffer);
+    // Use type assertion to bypass the Buffer<ArrayBuffer> vs Buffer mismatch.
+    // ExcelJS xlsx.load accepts Buffer or Uint8Array.
+    await sourceWorkbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
 
     // Process all sheets in each file
     for (const sourceSheet of sourceWorkbook.worksheets) {
