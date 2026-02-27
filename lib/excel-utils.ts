@@ -215,16 +215,16 @@ export function copyRowWithFormatting(sourceRow: ExcelJS.Row, targetRow: ExcelJS
 
     // Copy formatting
     if (sourceCell.font) {
-      targetCell.font = { ...sourceCell.font };
+      targetCell.font = sourceCell.font;
     }
     if (sourceCell.fill) {
-      targetCell.fill = { ...sourceCell.fill };
+      targetCell.fill = sourceCell.fill;
     }
     if (sourceCell.alignment) {
-      targetCell.alignment = { ...sourceCell.alignment };
+      targetCell.alignment = sourceCell.alignment;
     }
     if (sourceCell.border) {
-      targetCell.border = { ...sourceCell.border };
+      targetCell.border = sourceCell.border;
     }
     // Copy number format if it exists
     if (sourceCell.numFmt) {
@@ -266,14 +266,12 @@ function copyWorksheetContents(sourceSheet: ExcelJS.Worksheet, targetSheet: Exce
         newCell.value = safeValue;
       }
 
-      if (cell.font) newCell.font = { ...cell.font };
-      if (cell.fill) newCell.fill = { ...cell.fill };
-      if (cell.alignment) newCell.alignment = { ...cell.alignment };
-      if (cell.border) newCell.border = { ...cell.border };
+      if (cell.font) newCell.font = cell.font;
+      if (cell.fill) newCell.fill = cell.fill;
+      if (cell.alignment) newCell.alignment = cell.alignment;
+      if (cell.border) newCell.border = cell.border;
       if (cell.numFmt) newCell.numFmt = cell.numFmt;
     });
-
-    targetRow.commit();
   });
 
   const merges = sourceSheet.model.merges || [];
@@ -328,9 +326,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
   // Load the first file to get the template structure
   const firstFileBuffer = await files[0].arrayBuffer();
   const templateWorkbook = new ExcelJS.Workbook();
-  await templateWorkbook.xlsx.load(firstFileBuffer, {
-    ignoreNodes: ['sharedFormula']
-  } as any);
+  await templateWorkbook.xlsx.load(firstFileBuffer);
 
   // Keep track of the first worksheet for formatting metadata
   const templateSheet = templateWorkbook.worksheets[0];
@@ -361,9 +357,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     } else {
       const arrayBuffer = await file.arrayBuffer();
       sourceWorkbook = new ExcelJS.Workbook();
-      await sourceWorkbook.xlsx.load(arrayBuffer, {
-        ignoreNodes: ['sharedFormula']
-      } as any);
+      await sourceWorkbook.xlsx.load(arrayBuffer);
     }
 
     // Process all sheets in each file
@@ -380,7 +374,6 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
           const sourceRow = sourceSheet.getRow(rowNum);
           const targetRow = worksheet.getRow(targetRowNum);
           copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
-          targetRow.commit();
           targetRowNum++;
         }
 
@@ -401,7 +394,6 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
           if (config.includeTotal) {
             const targetRow = worksheet.getRow(targetRowNum);
             copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
-            targetRow.commit();
             targetRowNum++;
           }
           continue;
@@ -429,7 +421,6 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
         // Copy regular data row
         const targetRow = worksheet.getRow(targetRowNum);
         copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
-        targetRow.commit();
         targetRowNum++;
       }
 
@@ -447,7 +438,6 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     for (const { row: sigRow } of signatureRowsToAdd) {
       const targetRow = worksheet.getRow(targetRowNum);
       copyRowWithFormatting(sigRow, targetRow, startColNum, endColNum);
-      targetRow.commit();
       targetRowNum++;
     }
   }
