@@ -48,11 +48,16 @@ export async function POST(request: NextRequest) {
       ? `merged_${originalName}`
       : `merged_${originalName}.xlsx`;
 
+    // ASCII-safe fallback filename (strip non-ASCII chars)
+    const safeFileName = fileName.replace(/[^\x20-\x7E]/g, '_');
+    // UTF-8 encoded filename for browsers that support RFC 5987
+    const encodedFileName = encodeURIComponent(fileName);
+
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${fileName}"`,
+        'Content-Disposition': `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodedFileName}`,
       },
     });
   } catch (error) {
