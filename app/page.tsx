@@ -49,7 +49,9 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to merge files');
+        const errorData = await response.json().catch(() => null);
+        const detail = errorData?.details || 'Unknown error';
+        throw new Error(`Failed to merge files: ${detail}`);
       }
 
       // Download the file

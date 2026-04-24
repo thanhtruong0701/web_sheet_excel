@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mergeExcelFiles } from '@/lib/excel-utils';
 
+// Vercel serverless function config
+export const maxDuration = 60; // seconds (Pro plan allows up to 60s)
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -52,9 +56,11 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Error merging files:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('Error merging files:', errorMessage, errorStack);
     return NextResponse.json(
-      { error: 'Failed to merge files' },
+      { error: 'Failed to merge files', details: errorMessage },
       { status: 500 }
     );
   }
