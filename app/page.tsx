@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { FileUploader } from '@/components/file-uploader';
 import { MergeConfigForm, type MergeFormConfig } from '@/components/merge-config-form';
 import { useToast } from '@/hooks/use-toast';
+import { mergeExcelFiles } from '@/lib/excel-utils';
 
 const DEFAULT_CONFIG: MergeFormConfig = {
   includeTotal: true,
@@ -33,33 +34,26 @@ export default function Home() {
 
     setLoading(true);
     try {
-      const formData = new FormData();
+      // Process files directly on the client side - no upload needed!
+      // This avoids Vercel's 4.5MB body size limit (413 error)
+      const buffer = await mergeExcelFiles(files, config);
 
-      // Add files
-      files.forEach((file) => {
-        formData.append('files', file);
-      });
-
-      // Add config
-      formData.append('config', JSON.stringify(config));
-
-      const response = await fetch('/api/merge-excel', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        const detail = errorData?.details || 'Unknown error';
-        throw new Error(`Failed to merge files: ${detail}`);
-      }
+      // Generate filename from first file
+      const firstFile = files[0];
+      const timestamp = new Date().toISOString().split('T')[0];
+      const originalName = firstFile?.name || `${timestamp}.xlsx`;
+      const fileName = originalName.toLowerCase().endsWith('.xlsx')
+        ? `merged_${originalName}`
+        : `merged_${originalName}.xlsx`;
 
       // Download the file
-      const blob = await response.blob();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'consolidated.xlsx';
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
