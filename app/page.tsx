@@ -1,10 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { Download, Loader2 } from 'lucide-react';
+import { Download, Loader2, Layers, FileStack } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FileUploader } from '@/components/file-uploader';
 import { MergeConfigForm, type MergeFormConfig } from '@/components/merge-config-form';
+import { MultiFileMerger } from '@/components/multi-file-merger';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { mergeExcelFiles } from '@/lib/excel-utils';
 
@@ -47,7 +49,7 @@ export default function Home() {
         : `merged_${originalName}.xlsx`;
 
       // Download the file
-      const blob = new Blob([buffer], {
+      const blob = new Blob([new Uint8Array(buffer)], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
       const url = window.URL.createObjectURL(blob);
@@ -93,58 +95,80 @@ export default function Home() {
           </p>
         </div>
 
-        {/* File Uploader */}
-        <FileUploader files={files} onFilesChange={setFiles} />
+        {/* Tabs */}
+        <Tabs defaultValue="merge-sheets" className="w-full">
+          <TabsList className="w-full">
+            <TabsTrigger value="merge-sheets" className="flex items-center gap-2">
+              <Layers className="h-4 w-4" />
+              Merge Sheets
+            </TabsTrigger>
+            <TabsTrigger value="import-merge" className="flex items-center gap-2">
+              <FileStack className="h-4 w-4" />
+              Import & Merge Files
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Config Form */}
-        <MergeConfigForm config={config} onChange={setConfig} />
+          {/* Tab 1: Original Merge Sheets */}
+          <TabsContent value="merge-sheets" className="space-y-6 mt-4">
+            {/* File Uploader */}
+            <FileUploader files={files} onFilesChange={setFiles} />
 
-        {/* Action Buttons */}
-        <div className="flex gap-2 justify-end">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setFiles([]);
-              setConfig(DEFAULT_CONFIG);
-            }}
-            disabled={loading}
-          >
-            Reset
-          </Button>
-          <Button onClick={handleMerge} disabled={loading || files.length === 0}>
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Merging...
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 h-4 w-4" />
-                Merge & Download
-              </>
-            )}
-          </Button>
-        </div>
+            {/* Config Form */}
+            <MergeConfigForm config={config} onChange={setConfig} />
 
-        {/* Info Section */}
-        <div className="bg-muted/50 border border-border rounded-lg p-4 space-y-2">
-          <h3 className="font-semibold text-sm">How it works:</h3>
-          <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-            <li>• Upload one or more Excel files</li>
-            <li>
-              • Rows before the "Data Start Row" are treated as headers and appear
-              only once
-            </li>
-            <li>• Data rows from all files are combined in sequence</li>
-            <li>
-              • TOTAL rows can be included to show subtotals for each file
-            </li>
-            <li>
-              • Signature sections are added at the end if enabled
-            </li>
-            <li>• Only specified columns are included in the output</li>
-          </ul>
-        </div>
+            {/* Action Buttons */}
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setFiles([]);
+                  setConfig(DEFAULT_CONFIG);
+                }}
+                disabled={loading}
+              >
+                Reset
+              </Button>
+              <Button onClick={handleMerge} disabled={loading || files.length === 0}>
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Merging...
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-2 h-4 w-4" />
+                    Merge & Download
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Info Section */}
+            <div className="bg-muted/50 border border-border rounded-lg p-4 space-y-2">
+              <h3 className="font-semibold text-sm">How it works:</h3>
+              <ul className="text-sm text-muted-foreground space-y-1 ml-4">
+                <li>• Upload one or more Excel files</li>
+                <li>
+                  • Rows before the &quot;Data Start Row&quot; are treated as headers and appear
+                  only once
+                </li>
+                <li>• Data rows from all files are combined in sequence</li>
+                <li>
+                  • TOTAL rows can be included to show subtotals for each file
+                </li>
+                <li>
+                  • Signature sections are added at the end if enabled
+                </li>
+                <li>• Only specified columns are included in the output</li>
+              </ul>
+            </div>
+          </TabsContent>
+
+          {/* Tab 2: Import & Merge Files */}
+          <TabsContent value="import-merge" className="mt-4">
+            <MultiFileMerger />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

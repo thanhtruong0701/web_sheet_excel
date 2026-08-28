@@ -450,3 +450,153 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
 
   return await outputWorkbook.xlsx.writeBuffer() as any;
 }
+
+/**
+ * Read sheet names from an Excel file (for preview purposes)
+ */
+export async function readSheetNames(file: File): Promise<string[]> {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
+  return workbook.worksheets.map(ws => ws.name);
+}
+
+/**
+ * Merge multiple Excel files into one file containing:
+ * 1. All original sheets from every file (renamed if duplicates)
+ * 2. A "Tổng hợp" (Consolidated) sheet that merges data from all sheets
+ *    using the same logic as mergeExcelFiles()
+ */
+export async function mergeMultipleFiles(files: File[], config: MergeConfig): Promise<Buffer> {
+  const outputWorkbook = new ExcelJS.Workbook();
+  const consolidatedSheet = outputWorkbook.addWorksheet('Tổng hợp');
+
+  const startColNum = columnLetterToNumber(config.startColumn);
+  const endColNum = columnLetterToNumber(config.endColumn);
+  const startRowNum = config.startRow;
+
+  let targetRowNum = 1;
+  let firstSheetOfAll = true;
+  let signatureRowsToAdd: { row: ExcelJS.Row; sourceSheet: ExcelJS.Worksheet }[] = [];
+  let usedSheetNames = new Set<string>(['Tổng hợp']);
+
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const file = files[fileIndex];
+    const arrayBuffer = await file.arrayBuffer();
+    const sourceWorkbook = new ExcelJS.Workbook();
+
+    await sourceWorkbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
+
+    // Get base name of the file (without extension) for naming context
+    const fileBaseName = file.name.replace(/\.(xlsx|xls)$/i, '');
+
+    for (const sourceSheet of sourceWorkbook.worksheets) {
+      // 1. Preserve the original sheet in the output workbook
+      let originalSheetName = sourceSheet.name;
+      let uniqueName = originalSheetName;
+      let counter = 1;
+      while (usedSheetNames.has(uniqueName)) {
+        uniqueName = `${originalSheetName} (${counter})`;
+        counter++;
+      }
+      usedSheetNames.add(uniqueName);
+
+      const newSheet = outputWorkbook.addWorksheet(uniqueName);
+      copyWorksheetContents(sourceSheet, newSheet);
+
+      // 2. Process data for the Consolidated (Tổng hợp) sheet
+      if (firstSheetOfAll) {
+        copyColumnWidths(sourceSheet, consolidatedSheet, startColNum, endColNum);
+      }
+
+      const totalRowNum = findTotalRow(sourceSheet);
+      const signatureRowNum = findSignatureRow(sourceSheet);
+
+      // Copy header rows only from the very first sheet
+      if (firstSheetOfAll) {
+        for (let rowNum = 1; rowNum < startRowNum; rowNum++) {
+          const sourceRow = sourceSheet.getRow(rowNum);
+          const targetRow = consolidatedSheet.getRow(targetRowNum);
+          if (sourceRow.height) targetRow.height = sourceRow.height;
+
+          copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+          targetRowNum++;
+        }
+        copyMergedCells(sourceSheet, consolidatedSheet, 1, startRowNum - 1, 1, startColNum, endColNum);
+      }
+
+      // Copy data rows to consolidated sheet
+      const dataStartRow = firstSheetOfAll ? startRowNum : startRowNum + 1;
+      const lastRow = sourceSheet.lastRow?.number || 0;
+
+      for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
+        const sourceRow = sourceSheet.getRow(rowNum);
+
+        // Handle total row
+        if (totalRowNum && rowNum === totalRowNum) {
+          if (config.includeTotal) {
+            const targetRow = consolidatedSheet.getRow(targetRowNum);
+            if (sourceRow.height) targetRow.height = sourceRow.height;
+            copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+            targetRowNum++;
+          }
+          continue;
+        }
+
+        // Handle signature section
+        if (signatureRowNum && rowNum >= signatureRowNum) {
+          if (config.includeSignature && signatureRowsToAdd.length === 0) {
+            for (let sigRowNum = signatureRowNum; sigRowNum <= lastRow; sigRowNum++) {
+              signatureRowsToAdd.push({
+                row: sourceSheet.getRow(sigRowNum),
+                sourceSheet
+              });
+            }
+          }
+          break;
+        }
+
+        // Skip subtotal rows
+        if (!config.includeTotal && isSubtotalRow(sourceRow, startColNum, endColNum)) {
+          continue;
+        }
+
+        // Copy regular data row
+        const targetRow = consolidatedSheet.getRow(targetRowNum);
+        if (sourceRow.height) targetRow.height = sourceRow.height;
+        copyRowWithFormatting(sourceRow, targetRow, startColNum, endColNum);
+        targetRowNum++;
+      }
+
+      if (firstSheetOfAll) firstSheetOfAll = false;
+    }
+  }
+
+  // Add signature section at the end of Consolidated sheet
+  if (signatureRowsToAdd.length > 0) {
+    for (const { row: sigRow } of signatureRowsToAdd) {
+      const targetRow = consolidatedSheet.getRow(targetRowNum);
+      if (sigRow.height) targetRow.height = sigRow.height;
+      copyRowWithFormatting(sigRow, targetRow, startColNum, endColNum);
+      targetRowNum++;
+    }
+  }
+
+  // Move Tổng hợp sheet to first position
+  // ExcelJS doesn't have a native moveSheet, so we reorder by setting orderNo
+  // (orderNo exists at runtime but is not in the public type definitions)
+  const worksheets = outputWorkbook.worksheets;
+  const consolidatedIndex = worksheets.findIndex(ws => ws.name === 'Tổng hợp');
+  if (consolidatedIndex > 0) {
+    // Reorder: set orderNo so Tổng hợp comes first
+    (consolidatedSheet as any).orderNo = 0;
+    let order = 1;
+    for (const ws of worksheets) {
+      if (ws.name !== 'Tổng hợp') {
+        (ws as any).orderNo = order++;
+      }
+    }
+  }
+
+  return await outputWorkbook.xlsx.writeBuffer() as any;
+}
