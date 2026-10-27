@@ -8,7 +8,7 @@ import { MergeConfigForm, type MergeFormConfig } from '@/components/merge-config
 import { MultiFileMerger } from '@/components/multi-file-merger';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { mergeExcelFiles } from '@/lib/excel-utils';
+import { mergeExcelFiles, resolveOutputFormat } from '@/lib/excel-utils';
 
 const DEFAULT_CONFIG: MergeFormConfig = {
   includeTotal: true,
@@ -16,6 +16,7 @@ const DEFAULT_CONFIG: MergeFormConfig = {
   startColumn: 'A',
   endColumn: 'Z',
   includeSignature: true,
+  outputFormat: 'auto',
 };
 
 export default function Home() {
@@ -38,18 +39,24 @@ export default function Home() {
     try {
       // Process files directly on the client side - no upload needed!
       // This avoids Vercel's 4.5MB body size limit (413 error)
+      const outputFormat = resolveOutputFormat(files, config.outputFormat);
       const buffer = await mergeExcelFiles(files, config);
 
       // Generate filename from first file
       const firstFile = files[0];
       const timestamp = new Date().toISOString().split('T')[0];
-      const originalName = firstFile?.name || `${timestamp}.xlsx`;
+      const originalName = firstFile?.name || `${timestamp}.${outputFormat}`;
       const baseName = originalName.replace(/\.(xlsx|xls|csv)$/i, '');
-      const fileName = `merged_${baseName}.xlsx`;
+      const fileName = `merged_${baseName}.${outputFormat}`;
+
+      const mimeType =
+        outputFormat === 'csv'
+          ? 'text/csv'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
       // Download the file
       const blob = new Blob([new Uint8Array(buffer)], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        type: mimeType,
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -61,8 +68,8 @@ export default function Home() {
       window.URL.revokeObjectURL(url);
 
       toast({
-        title: 'Success',
-        description: 'Files merged successfully and download started.',
+        title: 'Thành công',
+        description: `Đã gộp thành công file ${outputFormat.toUpperCase()}: ${fileName}`,
       });
 
       // Reset only files, keep config for next merge

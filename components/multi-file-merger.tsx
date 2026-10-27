@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { FileUploader } from '@/components/file-uploader';
 import { MergeConfigForm, type MergeFormConfig } from '@/components/merge-config-form';
 import { useToast } from '@/hooks/use-toast';
-import { mergeMultipleFiles, readSheetNames } from '@/lib/excel-utils';
+import { mergeMultipleFiles, readSheetNames, resolveOutputFormat } from '@/lib/excel-utils';
 
 interface FileWithSheets {
   file: File;
@@ -21,6 +21,7 @@ const DEFAULT_CONFIG: MergeFormConfig = {
   startColumn: 'A',
   endColumn: 'Z',
   includeSignature: true,
+  outputFormat: 'auto',
 };
 
 export function MultiFileMerger() {
@@ -105,13 +106,19 @@ export function MultiFileMerger() {
 
     setLoading(true);
     try {
+      const outputFormat = resolveOutputFormat(files, config.outputFormat);
       const buffer = await mergeMultipleFiles(files, config);
 
       const timestamp = new Date().toISOString().split('T')[0];
-      const fileName = `gop_tat_ca_${timestamp}.xlsx`;
+      const fileName = `gop_tat_ca_${timestamp}.${outputFormat}`;
+
+      const mimeType =
+        outputFormat === 'csv'
+          ? 'text/csv'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
       const blob = new Blob([new Uint8Array(buffer)], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        type: mimeType,
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -124,7 +131,7 @@ export function MultiFileMerger() {
 
       toast({
         title: 'Thành công!',
-        description: `Đã gộp ${files.length} file (${totalSheets} sheet) thành 1 file. Đang tải xuống...`,
+        description: `Đã gộp ${files.length} file thành file ${outputFormat.toUpperCase()}: ${fileName}`,
       });
 
       setFilesWithSheets([]);

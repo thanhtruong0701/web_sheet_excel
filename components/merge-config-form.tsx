@@ -5,6 +5,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export interface MergeFormConfig {
   includeTotal: boolean;
@@ -12,6 +19,7 @@ export interface MergeFormConfig {
   startColumn: string;
   endColumn: string;
   includeSignature: boolean;
+  outputFormat?: 'auto' | 'xlsx' | 'csv';
 }
 
 interface MergeConfigFormProps {
@@ -142,6 +150,29 @@ export function MergeConfigForm({ config, onChange }: MergeConfigFormProps) {
           <p className="text-xs text-muted-foreground ml-6">
             Include signature blocks ("Người lập phiếu" and "Người nhận") at the
             end
+          </p>
+        </div>
+
+        {/* Output Format */}
+        <div className="space-y-2">
+          <Label htmlFor="output-format" className="font-medium">
+            Định dạng file xuất (Output Format)
+          </Label>
+          <Select
+            value={config.outputFormat || 'auto'}
+            onValueChange={(value) => handleChange('outputFormat', value as 'auto' | 'xlsx' | 'csv')}
+          >
+            <SelectTrigger id="output-format" className="w-full">
+              <SelectValue placeholder="Chọn định dạng xuất" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Tự động (Theo định dạng file tải lên)</SelectItem>
+              <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+              <SelectItem value="csv">CSV (.csv)</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Mặc định tự động: nếu đưa file CSV thì xuất đúng CSV, nếu file Excel thì xuất Excel (.xlsx)
           </p>
         </div>
       </CardContent>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mergeExcelFiles } from '@/lib/excel-utils';
+import { mergeExcelFiles, resolveOutputFormat, MergeConfig } from '@/lib/excel-utils';
 
 // Vercel serverless function config
 export const maxDuration = 60; // seconds (Pro plan allows up to 60s)
@@ -10,12 +10,13 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
 
     const files: File[] = [];
-    let config = {
+    let config: MergeConfig = {
       includeTotal: false,
       startRow: 1,
       startColumn: 'A',
       endColumn: 'Z',
       includeSignature: false,
+      outputFormat: 'auto',
     };
 
     // Extract files
@@ -39,23 +40,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const outputFormat = resolveOutputFormat(files, config.outputFormat);
     const buffer = await mergeExcelFiles(files, config);
 
     const firstFile = files[0];
     const timestamp = new Date().toISOString().split('T')[0];
-    const originalName = firstFile?.name || `${timestamp}.xlsx`;
+    const originalName = firstFile?.name || `${timestamp}.${outputFormat}`;
     const baseName = originalName.replace(/\.(xlsx|xls|csv)$/i, '');
-    const fileName = `merged_${baseName}.xlsx`;
+    const fileName = `merged_${baseName}.${outputFormat}`;
 
     // ASCII-safe fallback filename (strip non-ASCII chars)
     const safeFileName = fileName.replace(/[^\x20-\x7E]/g, '_');
     // UTF-8 encoded filename for browsers that support RFC 5987
     const encodedFileName = encodeURIComponent(fileName);
 
+    const contentType =
+      outputFormat === 'csv'
+        ? 'text/csv'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodedFileName}`,
       },
     });

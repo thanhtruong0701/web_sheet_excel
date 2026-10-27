@@ -6,6 +6,7 @@ export interface MergeConfig {
   startColumn: string;
   endColumn: string;
   includeSignature: boolean;
+  outputFormat?: 'auto' | 'xlsx' | 'csv';
 }
 
 /**
@@ -332,10 +333,81 @@ function cloneStyle(style: any): any {
 }
 
 /**
- * Check if a file is a CSV file based on its name
+ * Check if a file is a CSV file based on its name or MIME type
  */
-export function isCsvFile(file: File): boolean {
-  return file.name.toLowerCase().endsWith('.csv');
+export function isCsvFile(file: any): boolean {
+  if (!file) return false;
+  const name = (typeof file === 'string' ? file : file.name || '').trim().toLowerCase();
+  const type = (typeof file === 'object' && file.type ? file.type : '').toLowerCase();
+  return name.endsWith('.csv') || type === 'text/csv' || type === 'application/csv' || type.includes('csv');
+}
+
+/**
+ * Determine the output format based on user preference and input files.
+ * If user preference is 'csv' or 'xlsx', respect it.
+ * If 'auto' or undefined:
+ * - If any input file is CSV, output as 'csv'.
+ * - Otherwise (only Excel files), output as 'xlsx'.
+ */
+export function resolveOutputFormat(
+  files: File[],
+  formatPreference?: 'auto' | 'xlsx' | 'csv'
+): 'xlsx' | 'csv' {
+  if (formatPreference === 'csv') return 'csv';
+  if (formatPreference === 'xlsx') return 'xlsx';
+  if (files && files.length > 0 && files.some(isCsvFile)) {
+    return 'csv';
+  }
+  return 'xlsx';
+}
+
+function formatCsvCell(val: any): string {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'object') {
+    if (val.text) return formatCsvCell(val.text);
+    if (val.result !== undefined) return formatCsvCell(val.result);
+    if (val instanceof Date) return val.toISOString();
+  }
+  let str = String(val);
+  if (str.includes('"') || str.includes(',') || str.includes('\n') || str.includes('\r')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+/**
+ * Export an ExcelJS worksheet to a standard RFC 4180 CSV byte array.
+ * Works natively in both browser and Node.js without stream dependencies.
+ */
+export function worksheetToCsv(worksheet: ExcelJS.Worksheet): Uint8Array {
+  const lines: string[] = [];
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    const cells: string[] = [];
+    const count = row.cellCount;
+    for (let c = 1; c <= count; c++) {
+      const cell = row.getCell(c);
+      cells.push(formatCsvCell(extractSafeCellValue(cell)));
+    }
+    lines.push(cells.join(','));
+  });
+  return new TextEncoder().encode(lines.join('\r\n'));
+}
+
+/**
+ * Prepend UTF-8 BOM (0xEF, 0xBB, 0xBF) to ensure Excel and other tools
+ * correctly display Vietnamese/Unicode characters when opening CSV files.
+ */
+export function addUtf8Bom(data: Uint8Array | Buffer | ArrayBuffer): Uint8Array {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return bytes;
+  }
+  const withBom = new Uint8Array(bytes.length + 3);
+  withBom[0] = 0xef;
+  withBom[1] = 0xbb;
+  withBom[2] = 0xbf;
+  withBom.set(bytes, 3);
+  return withBom;
 }
 
 function castCsvValue(val: string): any {
@@ -568,6 +640,11 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
     }
   }
 
+  const outputFormat = resolveOutputFormat(files, config.outputFormat);
+  if (outputFormat === 'csv') {
+    return worksheetToCsv(consolidatedSheet) as any;
+  }
+
   return await outputWorkbook.xlsx.writeBuffer() as any;
 }
 
@@ -718,6 +795,11 @@ export async function mergeMultipleFiles(files: File[], config: MergeConfig): Pr
         (ws as any).orderNo = order++;
       }
     }
+  }
+
+  const outputFormat = resolveOutputFormat(files, config.outputFormat);
+  if (outputFormat === 'csv') {
+    return worksheetToCsv(consolidatedSheet) as any;
   }
 
   return await outputWorkbook.xlsx.writeBuffer() as any;
