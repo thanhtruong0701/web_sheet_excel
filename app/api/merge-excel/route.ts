@@ -44,9 +44,8 @@ export async function POST(request: NextRequest) {
     const firstFile = files[0];
     const timestamp = new Date().toISOString().split('T')[0];
     const originalName = firstFile?.name || `${timestamp}.xlsx`;
-    const fileName = originalName.toLowerCase().endsWith('.xlsx')
-      ? `merged_${originalName}`
-      : `merged_${originalName}.xlsx`;
+    const baseName = originalName.replace(/\.(xlsx|xls|csv)$/i, '');
+    const fileName = `merged_${baseName}.xlsx`;
 
     // ASCII-safe fallback filename (strip non-ASCII chars)
     const safeFileName = fileName.replace(/[^\x20-\x7E]/g, '_');

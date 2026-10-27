@@ -28,7 +28,7 @@ export default function Home() {
     if (files.length === 0) {
       toast({
         title: 'No files selected',
-        description: 'Please select at least one Excel file to merge.',
+        description: 'Please select at least one Excel or CSV file to merge.',
         variant: 'destructive',
       });
       return;
@@ -44,9 +44,8 @@ export default function Home() {
       const firstFile = files[0];
       const timestamp = new Date().toISOString().split('T')[0];
       const originalName = firstFile?.name || `${timestamp}.xlsx`;
-      const fileName = originalName.toLowerCase().endsWith('.xlsx')
-        ? `merged_${originalName}`
-        : `merged_${originalName}.xlsx`;
+      const baseName = originalName.replace(/\.(xlsx|xls|csv)$/i, '');
+      const fileName = `merged_${baseName}.xlsx`;
 
       // Download the file
       const blob = new Blob([new Uint8Array(buffer)], {
@@ -90,7 +89,7 @@ export default function Home() {
         <div className="space-y-2">
           <h1 className="text-3xl font-bold tracking-tight">Excel Sheet Merger</h1>
           <p className="text-muted-foreground">
-            Merge multiple Excel files into one consolidated spreadsheet with
+            Merge multiple Excel or CSV files into one consolidated spreadsheet with
             customizable options
           </p>
         </div>
@@ -147,7 +146,7 @@ export default function Home() {
             <div className="bg-muted/50 border border-border rounded-lg p-4 space-y-2">
               <h3 className="font-semibold text-sm">How it works:</h3>
               <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                <li>• Upload one or more Excel files</li>
+                <li>• Upload one or more Excel or CSV files</li>
                 <li>
                   • Rows before the &quot;Data Start Row&quot; are treated as headers and appear
                   only once

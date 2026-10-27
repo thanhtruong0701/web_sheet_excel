@@ -332,6 +332,129 @@ function cloneStyle(style: any): any {
 }
 
 /**
+ * Check if a file is a CSV file based on its name
+ */
+export function isCsvFile(file: File): boolean {
+  return file.name.toLowerCase().endsWith('.csv');
+}
+
+function castCsvValue(val: string): any {
+  const trimmed = val.trim();
+  if (trimmed === '') return '';
+  // Check if it's a number
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    // Preserve leading zeroes like 0123 or 0901234567 as string
+    if (trimmed.length > 1 && trimmed.startsWith('0') && !trimmed.startsWith('0.')) {
+      return val;
+    }
+    if (trimmed.length > 2 && trimmed.startsWith('-0') && !trimmed.startsWith('-0.')) {
+      return val;
+    }
+    const num = Number(trimmed);
+    if (!isNaN(num)) return num;
+  }
+  return val;
+}
+
+/**
+ * Parse CSV text into 2D array adhering to RFC 4180
+ * Handles commas, semicolons, tabs, quotes, escaped quotes, multiline text, and UTF-8 BOM
+ */
+export function parseCSV(text: string): any[][] {
+  if (!text) return [];
+
+  // Strip UTF-8 BOM if present
+  if (text.charCodeAt(0) === 0xFEFF) {
+    text = text.slice(1);
+  }
+
+  // Detect delimiter: comma, semicolon, or tab
+  let delimiter = ',';
+  const firstLine = text.split(/\r\n|\n|\r/)[0] || '';
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  if (semiCount > commaCount && semiCount > tabCount) {
+    delimiter = ';';
+  } else if (tabCount > commaCount && tabCount > semiCount) {
+    delimiter = '\t';
+  }
+
+  const rows: any[][] = [];
+  let currentRow: any[] = [];
+  let currentVal = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && nextChar === '"') {
+        currentVal += '"';
+        i++; // skip escaped quote
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        currentVal += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+      } else if (char === delimiter) {
+        currentRow.push(castCsvValue(currentVal));
+        currentVal = '';
+      } else if (char === '\r') {
+        if (nextChar === '\n') {
+          i++;
+        }
+        currentRow.push(castCsvValue(currentVal));
+        rows.push(currentRow);
+        currentRow = [];
+        currentVal = '';
+      } else if (char === '\n') {
+        currentRow.push(castCsvValue(currentVal));
+        rows.push(currentRow);
+        currentRow = [];
+        currentVal = '';
+      } else {
+        currentVal += char;
+      }
+    }
+  }
+
+  if (currentVal || currentRow.length > 0) {
+    currentRow.push(castCsvValue(currentVal));
+    rows.push(currentRow);
+  }
+
+  return rows;
+}
+
+/**
+ * Load Excel or CSV file into an ExcelJS Workbook
+ */
+export async function loadWorkbookFromFile(file: File): Promise<ExcelJS.Workbook> {
+  const workbook = new ExcelJS.Workbook();
+  if (isCsvFile(file)) {
+    const text = typeof file.text === 'function'
+      ? await file.text()
+      : new TextDecoder('utf-8').decode(await file.arrayBuffer());
+    const rows = parseCSV(text);
+    const rawName = file.name.replace(/\.csv$/i, '').trim();
+    const safeSheetName = rawName.replace(/[\\/?*:[\]]/g, '_').slice(0, 31) || 'Sheet1';
+    const worksheet = workbook.addWorksheet(safeSheetName);
+    for (const row of rows) {
+      worksheet.addRow(row);
+    }
+  } else {
+    const arrayBuffer = await file.arrayBuffer();
+    await workbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
+  }
+  return workbook;
+}
+
+/**
  * Merge multiple Excel files into one
  */
 export async function mergeExcelFiles(files: File[], config: MergeConfig): Promise<Buffer> {
@@ -349,10 +472,7 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const file = files[fileIndex];
-    const arrayBuffer = await file.arrayBuffer();
-    const sourceWorkbook = new ExcelJS.Workbook();
-
-    await sourceWorkbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
+    const sourceWorkbook = await loadWorkbookFromFile(file);
 
     for (const sourceSheet of sourceWorkbook.worksheets) {
       if (sourceSheet.name === 'Consolidated') continue;
@@ -452,9 +572,14 @@ export async function mergeExcelFiles(files: File[], config: MergeConfig): Promi
 }
 
 /**
- * Read sheet names from an Excel file (for preview purposes)
+ * Read sheet names from an Excel or CSV file (for preview purposes)
  */
 export async function readSheetNames(file: File): Promise<string[]> {
+  if (isCsvFile(file)) {
+    const rawName = file.name.replace(/\.csv$/i, '').trim();
+    const safeSheetName = rawName.replace(/[\\/?*:[\]]/g, '_').slice(0, 31) || 'Sheet1';
+    return [safeSheetName];
+  }
   const arrayBuffer = await file.arrayBuffer();
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
@@ -482,13 +607,10 @@ export async function mergeMultipleFiles(files: File[], config: MergeConfig): Pr
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const file = files[fileIndex];
-    const arrayBuffer = await file.arrayBuffer();
-    const sourceWorkbook = new ExcelJS.Workbook();
-
-    await sourceWorkbook.xlsx.load(new Uint8Array(arrayBuffer) as any);
+    const sourceWorkbook = await loadWorkbookFromFile(file);
 
     // Get base name of the file (without extension) for naming context
-    const fileBaseName = file.name.replace(/\.(xlsx|xls)$/i, '');
+    const fileBaseName = file.name.replace(/\.(xlsx|xls|csv)$/i, '');
 
     for (const sourceSheet of sourceWorkbook.worksheets) {
       // 1. Preserve the original sheet in the output workbook

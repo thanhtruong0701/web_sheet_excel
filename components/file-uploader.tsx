@@ -29,12 +29,18 @@ export function FileUploader({ files, onFilesChange }: FileUploaderProps) {
     e.preventDefault();
     setIsDragging(false);
 
-    const droppedFiles = Array.from(e.dataTransfer.files).filter(
-      (file) =>
+    const droppedFiles = Array.from(e.dataTransfer.files).filter((file) => {
+      const name = file.name.toLowerCase();
+      return (
+        name.endsWith('.xlsx') ||
+        name.endsWith('.xls') ||
+        name.endsWith('.csv') ||
         file.type ===
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-        file.type === 'application/vnd.ms-excel'
-    );
+        file.type === 'application/vnd.ms-excel' ||
+        file.type === 'text/csv'
+      );
+    });
 
     onFilesChange([...files, ...droppedFiles]);
   };
@@ -54,9 +60,9 @@ export function FileUploader({ files, onFilesChange }: FileUploaderProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Upload Excel Files</CardTitle>
+        <CardTitle>Upload Excel / CSV Files</CardTitle>
         <CardDescription>
-          Drag and drop or click to select Excel files to merge
+          Drag and drop or click to select Excel (.xlsx, .xls) or CSV (.csv) files to merge
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -72,15 +78,15 @@ export function FileUploader({ files, onFilesChange }: FileUploaderProps) {
           }`}
         >
           <Upload className="mx-auto h-8 w-8 mb-2 text-muted-foreground" />
-          <p className="text-sm font-medium">Drop your Excel files here</p>
+          <p className="text-sm font-medium">Drop your Excel or CSV files here</p>
           <p className="text-xs text-muted-foreground mt-1">
-            or click to browse
+            or click to browse (.xlsx, .xls, .csv)
           </p>
           <input
             ref={inputRef}
             type="file"
             multiple
-            accept=".xlsx,.xls"
+            accept=".xlsx,.xls,.csv"
             onChange={handleInputChange}
             className="hidden"
           />

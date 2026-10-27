@@ -97,7 +97,7 @@ export function MultiFileMerger() {
     if (files.length === 0) {
       toast({
         title: 'Chưa chọn file',
-        description: 'Vui lòng chọn ít nhất 1 file Excel để gộp.',
+        description: 'Vui lòng chọn ít nhất 1 file Excel hoặc CSV để gộp.',
         variant: 'destructive',
       });
       return;
@@ -244,7 +244,7 @@ export function MultiFileMerger() {
       <div className="bg-muted/50 border border-border rounded-lg p-4 space-y-2">
         <h3 className="font-semibold text-sm">Cách hoạt động:</h3>
         <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-          <li>• Import nhiều file Excel cùng lúc</li>
+          <li>• Import nhiều file Excel hoặc CSV cùng lúc</li>
           <li>• Tất cả sheet gốc từ mỗi file được giữ nguyên trong file output</li>
           <li>• Sheet trùng tên sẽ được đánh số tự động (Sheet1, Sheet1 (2)...)</li>
           <li>
